@@ -6,9 +6,9 @@ import { useTheme } from '../context/ThemeContext';
 import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../utils/axiosInstance';
 import Sidebar from '../components/Sidebar';
-import Breadcrumb from '../components/Breadcrumb';
 import PageHeader from '../components/PageHeader';
 import UserMenu from '../components/UserMenu';
+import MobileNavigation from '../components/MobileNavigation';
 import {
   Phone, TrendingUp, DollarSign, Clock, LogOut, Settings, Menu, X,
   BarChart3, Users, AlertCircle, CheckCircle, RefreshCw
@@ -125,9 +125,6 @@ const Dashboard = () => {
 
       {/* Main Content */}
       <div className={`hidden md:flex md:flex-col flex-1 transition-all duration-300 ${sidebarOpen ? 'md:ml-64' : 'md:ml-20'}`}>
-        {/* Breadcrumb Navigation */}
-        <Breadcrumb />
-
         {/* Page Header with User Menu */}
         <PageHeader 
           title={t('dashboard.title')}
@@ -241,6 +238,8 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+      {/* Mobile Navigation */}
+      <MobileNavigation />
     </div>
   );
 };
