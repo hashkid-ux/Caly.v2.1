@@ -3,11 +3,14 @@ import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
 import { useTheme } from '../context/ThemeContext';
 import PageHeader from '../components/PageHeader';
+import MobileNavigation from '../components/MobileNavigation';
+import { SkeletonCard } from '../components/SkeletonLoader';
+import EmptyState from '../components/EmptyState';
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
-import { TrendingUp, DollarSign, Phone, Clock, AlertCircle, Loader } from 'lucide-react';
+import { TrendingUp, DollarSign, Phone, Clock, AlertCircle } from 'lucide-react';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
@@ -78,12 +81,21 @@ const AnalyticsPage = () => {
 
   if (loading) {
     return (
-      <div className={`flex items-center justify-center min-h-screen ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
-        <div className="text-center">
-          <Loader className="w-12 h-12 text-blue-600 animate-spin mx-auto mb-4" />
-          <p className={isDark ? 'text-gray-400' : 'text-gray-600'}>{t('analytics.loadingAnalytics')}</p>
+      <>
+        <PageHeader title={t('analytics.title')} />
+        <div className={`p-6 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <SkeletonCard key={i} count={1} />
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <SkeletonCard count={3} />
+            <SkeletonCard count={3} />
+          </div>
         </div>
-      </div>
+        <MobileNavigation />
+      </>
     );
   }
 
