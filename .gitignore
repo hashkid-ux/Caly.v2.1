@@ -1,6 +1,11 @@
 .vercel
+.env
 .env.*
-*.txt
-*.md
 Backend/.env
 *.pdf
+*.txt
+node_modules/
+dist/
+build/
+.DS_Store
+*.log
