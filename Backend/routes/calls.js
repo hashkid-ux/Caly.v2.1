@@ -5,69 +5,132 @@ const resolve = require('../utils/moduleResolver');
 const db = require(resolve('db/postgres'));
 const logger = require(resolve('utils/logger'));
 const Pagination = require(resolve('utils/pagination'));
+const { authMiddleware } = require(resolve('auth/authMiddleware'));
 
 // GET /api/calls - List all calls (MULTI-TENANT: filtered by user's client_id)
-router.get('/', async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     // CRITICAL: User can only see their own company's calls
     const userClientId = req.user.client_id;
     
-    // Use pagination utility
-    const pagination = Pagination.fromQuery(req.query);
-
-    const { 
+    // Extract query parameters
+    const {
+      limit = 50,
+      offset = 0,
+      sector,
+      agent,
+      status,
+      days,
+      search,
       resolved,
       phone_from
     } = req.query;
 
-    let query = 'SELECT * FROM calls WHERE client_id = $1';
-    const params = [userClientId];
-    let paramIndex = 2;
+    // Validate pagination inputs
+    const pageLimit = Math.min(parseInt(limit) || 50, 500);
+    const pageOffset = Math.max(parseInt(offset) || 0, 0);
 
+    // Start building query parameters with client_id
+    let queryParams = [userClientId];
+    let paramCount = 2;
+    let whereConditions = ['client_id = $1'];
+
+    // Add status/resolved filter
+    if (status && status.trim()) {
+      if (status === 'completed') {
+        whereConditions.push(`resolved = $${paramCount}`);
+        queryParams.push(true);
+        paramCount++;
+      } else if (status === 'unresolved') {
+        whereConditions.push(`resolved = $${paramCount}`);
+        queryParams.push(false);
+        paramCount++;
+      }
+    }
+
+    // Add date range filter (not parameterized - it's a literal)
+    if (days) {
+      const daysInt = Math.min(Math.max(parseInt(days) || 7, 1), 365);
+      whereConditions.push(`start_ts >= NOW() - INTERVAL '${daysInt} days'`);
+    }
+
+    // Add search filter - search in phone_from, phone_to, transcript_full
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+      whereConditions.push(
+        `(phone_from ILIKE $${paramCount} OR phone_to ILIKE $${paramCount} OR transcript_full ILIKE $${paramCount})`
+      );
+      queryParams.push(searchTerm);
+      paramCount++;
+    }
+
+    // Legacy resolved filter
     if (resolved !== undefined) {
-      query += ` AND resolved = $${paramIndex}`;
-      params.push(resolved === 'true');
-      paramIndex++;
+      whereConditions.push(`resolved = $${paramCount}`);
+      queryParams.push(resolved === 'true');
+      paramCount++;
     }
 
+    // Legacy phone_from filter
     if (phone_from) {
-      query += ` AND phone_from = $${paramIndex}`;
-      params.push(phone_from);
-      paramIndex++;
+      whereConditions.push(`phone_from = $${paramCount}`);
+      queryParams.push(phone_from);
+      paramCount++;
     }
 
-    query += ` ORDER BY start_ts DESC${pagination.applySql()}`;
-    params.push(pagination.limit, pagination.offset);
-
-    const result = await db.query(query, params);
+    const whereClause = whereConditions.join(' AND ');
 
     // Get total count - also filtered by client_id
-    let countQuery = 'SELECT COUNT(*) FROM calls WHERE client_id = $1';
-    const countParams = [userClientId];
-    let countParamIndex = 2;
+    const countQuery = `SELECT COUNT(*) as total FROM calls WHERE ${whereClause}`;
+    const countResult = await db.query(countQuery, queryParams.slice(0, paramCount - 1));
+    const total = parseInt(countResult.rows[0]?.total || 0);
 
-    if (resolved !== undefined) {
-      countQuery += ` AND resolved = $${countParamIndex}`;
-      countParams.push(resolved === 'true');
-      countParamIndex++;
-    }
+    // Fetch calls with pagination
+    const dataQuery = `
+      SELECT 
+        id,
+        client_id,
+        call_sid,
+        phone_from,
+        phone_to,
+        start_ts,
+        end_ts,
+        duration_seconds,
+        transcript_full,
+        recording_url,
+        resolved,
+        customer_satisfaction,
+        created_at,
+        updated_at
+      FROM calls 
+      WHERE ${whereClause}
+      ORDER BY start_ts DESC
+      LIMIT $${paramCount} OFFSET $${paramCount + 1}
+    `;
 
-    if (phone_from) {
-      countQuery += ` AND phone_from = $${countParamIndex}`;
-      countParams.push(phone_from);
-    }
+    // Add limit and offset
+    const finalParams = [...queryParams.slice(0, paramCount - 1), pageLimit, pageOffset];
+    
+    const result = await db.query(dataQuery, finalParams);
 
-    const countResult = await db.query(countQuery, countParams);
-    const total = parseInt(countResult.rows[0].count);
-
+    // Return success response
     res.json({
-      calls: result.rows,
-      ...pagination.getMetadata(total),
+      success: true,
+      data: result.rows || [],
+      total: total,
+      page: Math.floor(pageOffset / pageLimit) + 1,
+      pages: Math.ceil(total / pageLimit),
+      limit: pageLimit,
+      offset: pageOffset
     });
 
   } catch (error) {
     logger.error('Error fetching calls', { error: error.message, userId: req.user?.id });
-    res.status(500).json({ error: 'Failed to fetch calls' });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch calls',
+      message: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
   }
 });
 
