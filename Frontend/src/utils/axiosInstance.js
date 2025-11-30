@@ -16,18 +16,28 @@ let refreshPromise = null;
 const axiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000, // 30 seconds (increased from 10s for better retry window)
+  withCredentials: true,  // ✅ SECURITY FIX: Send httpOnly cookies with all requests
   headers: {
     'Content-Type': 'application/json'
   }
 });
 
-// Add auth token to all requests
+// Add auth token to all requests (supports both httpOnly cookies AND Authorization header)
+// ✅ FIX: Add Authorization header with localStorage token for OAuth/manual auth
+// Cookies are automatically sent by browser when credentials: 'include' is set
 axiosInstance.interceptors.request.use(
   config => {
-    const token = localStorage.getItem('accessToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    // Check if token exists in localStorage (OAuth or manual token storage)
+    const accessToken = localStorage.getItem('accessToken');
+    
+    if (accessToken) {
+      // Add Authorization header with Bearer token
+      config.headers.Authorization = `Bearer ${accessToken}`;
+      logger.debug('[AXIOS] Added Authorization header with localStorage token');
     }
+    
+    // httpOnly cookies are automatically sent by the browser via withCredentials
+    logger.debug('[AXIOS] Request to ' + config.url);
     return config;
   },
   error => Promise.reject(error)
@@ -70,39 +80,74 @@ axiosInstance.interceptors.response.use(
       return axiosInstance(originalRequest);
     }
 
-    // Handle 401 (token expired) - refresh token once
+    // Handle 401 (token expired) - refresh token once with proper locking
     if (error.response?.status === 401 && !originalRequest._tokenRefreshAttempted) {
       originalRequest._tokenRefreshAttempted = true;
 
       try {
+        // ✅ SECURITY FIX: Proper locking mechanism to prevent race condition
+        // All concurrent requests wait for the SAME refresh promise
         if (!refreshPromise) {
-          const refreshToken = localStorage.getItem('refreshToken');
+          logger.debug('[AXIOS] Starting token refresh...');
           
-          if (!refreshToken) {
-            // No refresh token, redirect to login
-            localStorage.removeItem('accessToken');
-            localStorage.removeItem('refreshToken');
-            localStorage.removeItem('user');
-            window.location.href = '/login?reason=session_expired';
-            return Promise.reject(error);
+          // ✅ FIX: Build refresh request with both strategies
+          const refreshConfig = { 
+            withCredentials: true  // ✅ Send/receive httpOnly cookies
+          };
+          
+          // If refreshToken in localStorage (OAuth flow), add to Authorization header
+          const refreshToken = localStorage.getItem('refreshToken');
+          if (refreshToken) {
+            refreshConfig.headers = {
+              Authorization: `Bearer ${refreshToken}`
+            };
+            logger.debug('[AXIOS] Sending refreshToken via Authorization header');
           }
-
-          refreshPromise = axios.post(`${API_BASE_URL}/api/auth/refresh`, {
-            refreshToken,
-          });
+          
+          refreshPromise = axios.post(
+            `${API_BASE_URL}/api/auth/refresh`,
+            {},  // Empty body
+            refreshConfig
+          )
+            .then(response => {
+              logger.debug('[AXIOS] Token refresh successful');
+              
+              // ✅ If response contains tokens, update localStorage
+              if (response.data?.accessToken) {
+                localStorage.setItem('accessToken', response.data.accessToken);
+                logger.debug('[AXIOS] Updated accessToken in localStorage');
+              }
+              if (response.data?.refreshToken) {
+                localStorage.setItem('refreshToken', response.data.refreshToken);
+                logger.debug('[AXIOS] Updated refreshToken in localStorage');
+              }
+              
+              return response;
+            })
+            .catch(err => {
+              logger.error('[AXIOS] Token refresh failed:', err.message);
+              throw err;
+            })
+            .finally(() => {
+              // Clear the refresh promise AFTER all concurrent requests have awaited it
+              refreshPromise = null;
+            });
         }
 
-        const response = await refreshPromise;
-        refreshPromise = null;
+        // ✅ SECURITY: Wait for refresh to complete (same promise for all concurrent requests)
+        await refreshPromise;
 
-        const { accessToken, refreshToken: newRefreshToken } = response.data;
-        localStorage.setItem('accessToken', accessToken);
-        localStorage.setItem('refreshToken', newRefreshToken);
-        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-
+        // ✅ Update Authorization header with new token from localStorage
+        const newAccessToken = localStorage.getItem('accessToken');
+        if (newAccessToken) {
+          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        }
+        
+        // Retry original request with refreshed token
         return axiosInstance(originalRequest);
       } catch (refreshError) {
-        refreshPromise = null;
+        logger.error('[AXIOS] Authentication failed - redirecting to login');
+        // Clear all auth data from localStorage and redirect to login
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
         localStorage.removeItem('user');

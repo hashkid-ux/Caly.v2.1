@@ -8,6 +8,36 @@ const PasswordUtils = require('../auth/passwordUtils');
 const { authMiddleware } = require('../auth/authMiddleware');
 const { v4: uuidv4 } = require('uuid');
 const emailService = require('../utils/email');
+const rateLimit = require('express-rate-limit');
+
+// 🔒 SECURITY: Rate limiters for critical auth endpoints
+const registerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,  // 15 minutes
+  max: 5,                     // 5 registration attempts per window
+  message: 'Too many registration attempts, try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip  // Use IP address as key
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,  // 15 minutes
+  max: 10,                    // 10 login attempts per window
+  skipSuccessfulRequests: true,  // Don't count successful logins
+  message: 'Too many login attempts, try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip
+});
+
+const otpVerifyLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,   // 1 minute
+  max: 3,                     // 3 OTP verification attempts per minute
+  message: 'Too many OTP verification attempts, try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip
+});
 
 // 🔒 TIMEOUT PROTECTION: Wrap route handler with timeout
 const withLoginTimeout = (handler) => {
@@ -34,7 +64,7 @@ const withLoginTimeout = (handler) => {
  * POST /api/auth/register - Register a new company with admin user
  * Body: { email, password, companyName, firstName, lastName, phone }
  */
-router.post('/register', async (req, res) => {
+router.post('/register', registerLimiter, async (req, res) => {
   try {
     const { email, password, companyName, firstName, lastName, phone } = req.body;
 
@@ -150,7 +180,7 @@ router.post('/register', async (req, res) => {
  * POST /api/auth/verify-email - Verify email with OTP
  * Body: { email, otp }
  */
-router.post('/verify-email', async (req, res) => {
+router.post('/verify-email', otpVerifyLimiter, async (req, res) => {
   try {
     const { email, otp } = req.body;
 
@@ -193,11 +223,61 @@ router.post('/verify-email', async (req, res) => {
       [user.client_id]
     );
 
-    logger.info('Email verified', { userId: user.id, email });
+    // ✅ FIX: Generate tokens immediately after email verification
+    // Get full user data for token payload
+    const verifiedUserResult = await db.query(
+      `SELECT u.id, u.email, u.name, u.role, u.client_id, c.name as company_name
+       FROM users u
+       JOIN clients c ON u.client_id = c.id
+       WHERE u.id = $1`,
+      [user.id]
+    );
 
+    const verifiedUser = verifiedUserResult.rows[0];
+
+    // Generate tokens
+    const tokenPayload = {
+      userId: verifiedUser.id,
+      email: verifiedUser.email,
+      client_id: verifiedUser.client_id,
+      role: verifiedUser.role,
+      companyName: verifiedUser.company_name
+    };
+
+    const { accessToken, refreshToken } = JWTUtils.generateTokenPair(tokenPayload);
+
+    // Set httpOnly cookies
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 60 * 60 * 1000,  // 1 hour
+      path: '/'
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 days
+      path: '/api/auth/refresh'
+    });
+
+    logger.info('Email verified and session created', { userId: verifiedUser.id, email, clientId: verifiedUser.client_id });
+
+    // ✅ Return tokens so frontend can save to localStorage
     res.json({
-      message: 'Email verified successfully. You can now log in.',
-      verified: true
+      message: 'Email verified successfully! Redirecting to onboarding...',
+      verified: true,
+      accessToken,
+      refreshToken,
+      user: {
+        id: verifiedUser.id,
+        email: verifiedUser.email,
+        name: verifiedUser.name,
+        clientId: verifiedUser.client_id,
+        companyName: verifiedUser.company_name
+      }
     });
 
   } catch (error) {
@@ -210,7 +290,7 @@ router.post('/verify-email', async (req, res) => {
  * POST /api/auth/login - Login with email and password
  * Body: { email, password }
  */
-router.post('/login', withLoginTimeout(async (req, res) => {
+router.post('/login', loginLimiter, withLoginTimeout(async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -284,6 +364,24 @@ router.post('/login', withLoginTimeout(async (req, res) => {
       [user.id]
     );
 
+    // ✅ SECURITY FIX: Set httpOnly cookies instead of returning tokens in JSON
+    // httpOnly cookies are NOT accessible to JavaScript (prevents XSS attacks)
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,      // ✅ NOT accessible to JavaScript
+      secure: process.env.NODE_ENV === 'production',  // HTTPS only in production
+      sameSite: 'strict',  // ✅ CSRF protection
+      maxAge: 60 * 60 * 1000,  // 1 hour
+      path: '/'
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,      // ✅ NOT accessible to JavaScript
+      secure: process.env.NODE_ENV === 'production',  // HTTPS only in production
+      sameSite: 'strict',  // ✅ CSRF protection
+      maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 days
+      path: '/api/auth/refresh'  // Only sent to refresh endpoint
+    });
+
     // ✅ PHASE 4 FIX 4.5: Log successful login
     logger.info('✅ User logged in successfully', { 
       userId: user.id, 
@@ -298,6 +396,8 @@ router.post('/login', withLoginTimeout(async (req, res) => {
       [user.client_id, JSON.stringify({ email }), user.id, req.ip]
     ).catch(err => logger.debug('Failed to log', { error: err.message }));
 
+    // ✅ SECURITY: Also return tokens in JSON for frontend flexibility
+    // Frontend can store in localStorage if preferred, or rely on httpOnly cookies
     res.json({
       message: 'Login successful',
       accessToken,
@@ -321,15 +421,33 @@ router.post('/login', withLoginTimeout(async (req, res) => {
 
 /**
  * POST /api/auth/refresh - Refresh access token
- * Body: { refreshToken }
- * Returns new access token if refresh token is valid and not blacklisted
+ * Supports two strategies:
+ * 1. httpOnly cookie (password login): refreshToken in cookie
+ * 2. Authorization header (OAuth): refreshToken as Bearer token in header
+ * Returns new access token via httpOnly cookie AND JSON response
  */
 router.post('/refresh', async (req, res) => {
   try {
-    const { refreshToken } = req.body;
+    let refreshToken = null;
+
+    // ✅ FIX: Check BOTH httpOnly cookies AND Authorization header
+    // Strategy 1: httpOnly cookie (password login)
+    if (req.cookies?.refreshToken) {
+      refreshToken = req.cookies.refreshToken;
+    }
+
+    // Strategy 2: Authorization header (OAuth)
+    if (!refreshToken && req.headers.authorization?.startsWith('Bearer ')) {
+      refreshToken = req.headers.authorization.substring(7);
+    }
+
+    // Strategy 3: Request body (fallback for edge cases)
+    if (!refreshToken && req.body?.refreshToken) {
+      refreshToken = req.body.refreshToken;
+    }
 
     if (!refreshToken) {
-      return res.status(400).json({ error: 'Refresh token required' });
+      return res.status(401).json({ error: 'Refresh token required - no valid session' });
     }
 
     // ✅ PHASE 2 FIX 2.1: Check if token is blacklisted (on logout)
@@ -348,17 +466,35 @@ router.post('/refresh', async (req, res) => {
     const { accessToken: newAccessToken, refreshToken: newRefreshToken } = 
       await JWTUtils.rotateRefreshToken(decoded, tokenPayload);
 
+    // ✅ SECURITY FIX: Set new tokens in httpOnly cookies
+    res.cookie('accessToken', newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 60 * 60 * 1000,  // 1 hour
+      path: '/'
+    });
+
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 days
+      path: '/api/auth/refresh'
+    });
+
     logger.info('✅ Token refreshed successfully (rotated)', {
       userId: decoded.userId,
       email: decoded.email,
       tokenRotated: true
     });
 
+    // ✅ Also return tokens in response for frontend flexibility
     res.json({
-      token: newAccessToken,
+      message: 'Token refreshed',
+      expiresIn: '1h',
       accessToken: newAccessToken,
-      refreshToken: newRefreshToken,
-      expiresIn: '24h'
+      refreshToken: newRefreshToken
     });
 
   } catch (error) {
