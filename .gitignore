@@ -10,3 +10,5 @@ build/
 .DS_Store
 *.log
 *.md
+Frontend/.env
+Frontend/.env.*
