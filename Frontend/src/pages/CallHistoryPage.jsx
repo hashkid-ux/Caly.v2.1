@@ -6,7 +6,7 @@ import PageHeader from '../components/PageHeader';
 import MobileNavigation from '../components/MobileNavigation';
 import { SkeletonTable } from '../components/SkeletonLoader';
 import EmptyState from '../components/EmptyState';
-import { Phone, Search, Filter, Clock, User, CheckCircle, AlertCircle } from 'lucide-react';
+import { Phone, Search, Filter, Clock, User, CheckCircle, AlertCircle, Badge } from 'lucide-react';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
@@ -22,7 +22,7 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
  * - Integration with call playback (future)
  */
 const CallHistoryPage = () => {
-  const { user, getAuthHeader } = useAuth();
+  const { user, sector, getAuthHeader } = useAuth();
   const { t } = useI18n();
   const { isDark } = useTheme();
   const [calls, setCalls] = useState([]);
@@ -115,8 +115,16 @@ const CallHistoryPage = () => {
         showBackButton={false}
       />
       <div className={isDark ? 'bg-gray-900 overflow-auto' : 'bg-gray-50 overflow-auto'}>
-        {/* Filters and Search */}
+        {/* Sector Badge and Filters */}
         <div className={isDark ? 'bg-gray-800 shadow p-6' : 'bg-white shadow p-6'}>
+          {sector && (
+            <div className="mb-4 flex items-center gap-2">
+              <Badge className="w-4 h-4 text-blue-500" />
+              <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                Active Sector: <span className="font-semibold text-blue-500">{sector.charAt(0).toUpperCase() + sector.slice(1)}</span>
+              </span>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Search */}
             <div className="md:col-span-2">

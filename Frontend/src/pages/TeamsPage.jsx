@@ -1,18 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 import ErrorBoundary from '../components/ErrorBoundary';
 import AgentAssignmentForm from '../components/AgentAssignmentForm';
 import TeamPerformanceDashboard from '../components/TeamPerformanceDashboard';
+import { Badge } from 'lucide-react';
 import '../styles/TeamsPage.css';
 
 /**
  * TeamsPage - Manage team members and their AI agent assignments
  * Shows list of human team members, their assigned agents, and performance metrics
+ * Displays only team members for the selected sector
  */
 const TeamsPage = () => {
-  const { user, token } = useAuth();
+  const { user, token, sector } = useAuth();
+  const { isDark } = useTheme();
   const [teamMembers, setTeamMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -118,10 +122,22 @@ const TeamsPage = () => {
       <ErrorBoundary>
         <div className="teams-page">
           <div className="teams-header">
-            <h1>Team Management</h1>
-            <p className="subtitle">
-              Manage team members and assign AI agents to handle customer support
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h1>Team Management</h1>
+                <p className="subtitle">
+                  Manage team members and assign AI agents to handle customer support
+                </p>
+              </div>
+              {sector && (
+                <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-blue-50'}`}>
+                  <Badge className="w-4 h-4 text-blue-500" />
+                  <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                    Sector: <span className="font-semibold text-blue-500">{sector.charAt(0).toUpperCase() + sector.slice(1)}</span>
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
 
           {error && (
