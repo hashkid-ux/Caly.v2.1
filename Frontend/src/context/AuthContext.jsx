@@ -456,7 +456,8 @@ export const AuthProvider = ({ children }) => {
     token,
     isRefreshing,
     onboardingCompleted,
-    sector, // ✅ SECTOR EXPANSION: Add sector to context value
+    sector,
+    setSector,
     isAuthenticated: isAuthenticated(),
     login,
     register,

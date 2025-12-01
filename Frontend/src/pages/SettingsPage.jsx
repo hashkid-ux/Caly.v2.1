@@ -1,34 +1,45 @@
-// Frontend/src/pages/SettingsPage.jsx - Company settings management
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
 import { useTheme } from '../context/ThemeContext';
-import PageHeader from '../components/PageHeader';
 import SectorSettingsForm from '../components/SectorSettingsForm';
 import {
   Settings, Save, AlertCircle, CheckCircle, Loader,
-  Globe, Phone, Users, Lock, Key, Bell
+  Globe, Phone, Users, Lock, Key, Bell, ArrowRight
 } from 'lucide-react';
 import axiosInstance from '../utils/axiosInstance';
 
 if (!process.env.REACT_APP_API_URL && process.env.NODE_ENV === 'production') {
-  throw new Error('❌ CRITICAL: REACT_APP_API_URL environment variable is required in production. Check your .env.production file.');
+  throw new Error('CRITICAL: REACT_APP_API_URL environment variable is required in production.');
 }
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
+const SECTORS = [
+  { id: 'ecommerce', name: 'E-Commerce', description: 'Online retail and marketplace' },
+  { id: 'healthcare', name: 'Healthcare', description: 'Medical services and clinics' },
+  { id: 'realestate', name: 'Real Estate', description: 'Property and housing services' },
+  { id: 'logistics', name: 'Logistics', description: 'Shipping and delivery services' },
+  { id: 'fintech', name: 'FinTech', description: 'Financial services and banking' },
+  { id: 'support', name: 'Support', description: 'Customer support centers' },
+  { id: 'telecom', name: 'Telecom', description: 'Telecommunications services' },
+  { id: 'government', name: 'Government', description: 'Public sector services' },
+  { id: 'education', name: 'Education', description: 'Educational institutions' },
+  { id: 'saas', name: 'SaaS', description: 'Software-as-a-service platforms' }
+];
+
 const SettingsPage = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, setSector } = useAuth();
   const { t } = useI18n();
   const { isDark } = useTheme();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [activeTab, setActiveTab] = useState('company');
-  const [selectedSector, setSelectedSector] = useState(null);
+  const [activeTab, setActiveTab] = useState('sector');
+  const [selectedSector, setSelectedSector] = useState(user?.sector || null);
 
   const [formData, setFormData] = useState({
     // Company Info
@@ -120,6 +131,50 @@ const SettingsPage = () => {
 
   const handleFieldBlur = (field) => {
     setTouchedFields(prev => ({ ...prev, [field]: true }));
+  };
+
+  const handleSaveSector = async () => {
+    if (!selectedSector) {
+      setError('Please select a sector');
+      return;
+    }
+
+    setError('');
+    setSuccess('');
+    setSaving(true);
+
+    try {
+      const clientId = user?.clientId || localStorage.getItem('clientId');
+      
+      if (!clientId) {
+        setError('No client information found. Please login again.');
+        setSaving(false);
+        return;
+      }
+
+      await axiosInstance.put(
+        `${API_BASE_URL}/api/clients/${clientId}`,
+        { sector: selectedSector }
+      );
+
+      if (setSector) {
+        setSector(selectedSector);
+      }
+
+      localStorage.setItem('userSector', selectedSector);
+
+      const sectorName = SECTORS.find(s => s.id === selectedSector)?.name || selectedSector;
+      setSuccess(`Sector changed to ${sectorName}. Reloading...`);
+      
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+    } catch (err) {
+      console.error('Save error:', err);
+      setError(err.response?.data?.error || 'Failed to save sector. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -245,10 +300,16 @@ const SettingsPage = () => {
   return (
     <div className={`min-h-screen ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
       {/* Header */}
-      <div className={isDark ? 'bg-gray-800 shadow' : 'bg-white shadow'}>
-        <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-          <h1 className={`text-2xl font-bold ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>{t('settings.title')}</h1>
-          <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'} mt-1`}>{t('settings.subtitle')}</p>
+      <div className={isDark ? 'bg-gray-800 shadow border-b border-gray-700' : 'bg-white shadow border-b'}>
+        <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+          <h1 className={`text-3xl font-bold ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>Settings</h1>
+          <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'} mt-2`}>Manage your account and sector configuration</p>
+          {selectedSector && (
+            <div className="mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-900">
+              <Globe className="w-4 h-4" />
+              <span className="text-sm font-medium">Active Sector: {SECTORS.find(s => s.id === selectedSector)?.name}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -269,18 +330,81 @@ const SettingsPage = () => {
         )}
 
         {/* Tabs */}
-        <div className={`${isDark ? 'bg-gray-800' : 'bg-white'} rounded-lg shadow mb-6 ${isDark ? 'border-b border-gray-700' : 'border-b'}`}>
+        <div className={`${isDark ? 'bg-gray-800 border-b border-gray-700' : 'bg-white border-b'} rounded-lg shadow mb-6`}>
           <div className="flex overflow-x-auto">
+            <Tab id="sector" label="Select Sector" icon={Globe} />
             <Tab id="company" label="Company Info" icon={Users} />
-            <Tab id="sector" label="Sector Config" icon={Globe} />
-            <Tab id="integrations" label="Integrations" icon={Globe} />
+            <Tab id="integrations" label="Integrations" icon={Phone} />
             <Tab id="business" label="Business Rules" icon={Settings} />
             <Tab id="channels" label="Channels" icon={Bell} />
           </div>
         </div>
 
         {/* Content */}
-        <div className={`${isDark ? 'bg-gray-800' : 'bg-white'} rounded-lg shadow p-6`}>
+        <div className={`${isDark ? 'bg-gray-800' : 'bg-white'} rounded-lg shadow p-6 md:p-8`}>
+          {/* Sector Selection Tab */}
+          {activeTab === 'sector' && (
+            <div>
+              <h2 className={`text-2xl font-bold ${isDark ? 'text-gray-100' : 'text-gray-900'} mb-2`}>Select Your Sector</h2>
+              <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-8`}>
+                Choose your business sector to load relevant agents, teams, and configurations
+              </p>
+
+              {selectedSector && (
+                <div className={`mb-6 p-3 ${isDark ? 'bg-blue-900/20 border-blue-800' : 'bg-blue-50 border-blue-200'} border rounded-lg`}>
+                  <p className={`text-sm ${isDark ? 'text-blue-300' : 'text-blue-800'}`}>
+                    Current Sector: <span className="font-bold">{SECTORS.find(s => s.id === selectedSector)?.name}</span>
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {SECTORS.map((sector) => (
+                  <button
+                    key={sector.id}
+                    onClick={() => setSelectedSector(sector.id)}
+                    disabled={saving}
+                    className={`p-4 rounded-lg border-2 transition-all text-left ${
+                      selectedSector === sector.id
+                        ? isDark 
+                          ? 'bg-blue-900/30 border-blue-500 text-blue-300' 
+                          : 'bg-blue-50 border-blue-500 text-blue-900'
+                        : isDark
+                          ? 'bg-gray-700 border-gray-600 text-gray-300 hover:border-gray-500'
+                          : 'bg-gray-50 border-gray-300 text-gray-700 hover:border-gray-400'
+                    } ${saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <h3 className="font-semibold text-lg mb-1">{sector.name}</h3>
+                    <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{sector.description}</p>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-4 mt-8">
+                <button
+                  onClick={() => navigate('/dashboard')}
+                  disabled={saving}
+                  className={`px-6 py-2 border rounded-lg font-medium transition-colors ${
+                    isDark 
+                      ? 'border-gray-600 text-gray-300 hover:bg-gray-700 disabled:opacity-50' 
+                      : 'border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50'
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveSector}
+                  disabled={saving || !selectedSector}
+                  className={`px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium flex items-center gap-2 transition-colors`}
+                >
+                  {saving && <Loader className="w-4 h-4 animate-spin" />}
+                  {saving ? 'Saving...' : 'Save & Reload'}
+                  {!saving && <ArrowRight className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Company Info Tab */}
           {activeTab === 'company' && (
             <div>
