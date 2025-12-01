@@ -2,6 +2,7 @@
 .env
 .env.*
 Backend/.env
+Backend/.env.*
 *.pdf
 *.txt
 node_modules/
