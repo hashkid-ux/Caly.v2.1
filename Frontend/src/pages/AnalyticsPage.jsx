@@ -10,14 +10,14 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
-import { TrendingUp, DollarSign, Phone, Clock, AlertCircle } from 'lucide-react';
+import { TrendingUp, DollarSign, Phone, Clock, AlertCircle, Badge } from 'lucide-react';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 /**
  * AnalyticsPage Component
  * 
- * Comprehensive analytics dashboard showing:
+ * Comprehensive analytics dashboard showing (sector-filtered):
  * - Key performance indicators (KPIs)
  * - Call volume trends (hourly/daily)
  * - Revenue breakdown
@@ -25,7 +25,7 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
  * - Agent performance metrics
  */
 const AnalyticsPage = () => {
-  const { getAuthHeader } = useAuth();
+  const { getAuthHeader, sector } = useAuth();
   const { t } = useI18n();
   const { isDark } = useTheme();
   const [analytics, setAnalytics] = useState(null);
@@ -122,6 +122,15 @@ const AnalyticsPage = () => {
         }
       />
       <div className={isDark ? 'bg-gray-900' : 'bg-gray-50'}>
+        {/* Sector Badge */}
+        {sector && (
+          <div className={`px-6 pt-6 pb-2 flex items-center gap-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+            <Badge className="w-4 h-4 text-blue-500" />
+            <span className="text-sm font-medium">
+              Active Sector: <span className="font-semibold text-blue-500">{sector.charAt(0).toUpperCase() + sector.slice(1)}</span>
+            </span>
+          </div>
+        )}
 
       {/* Error Alert */}
       {error && (
